@@ -1,0 +1,1270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GPU Inference Dashboard</title>
+  <meta name="description" content="Deploy and manage LLM and ASR models on free Kaggle GPUs">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    /* ─── Reset & Base ─────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary: #06080f;
+      --bg-card: rgba(15, 20, 35, 0.75);
+      --bg-card-hover: rgba(20, 28, 50, 0.85);
+      --bg-input: rgba(10, 14, 28, 0.8);
+      --border: rgba(100, 140, 255, 0.1);
+      --border-focus: rgba(0, 180, 255, 0.4);
+      --text-primary: #e8ecf4;
+      --text-secondary: #8892a8;
+      --text-dim: #556078;
+      --accent: #00b4ff;
+      --accent-glow: rgba(0, 180, 255, 0.25);
+      --success: #00e87b;
+      --success-glow: rgba(0, 232, 123, 0.2);
+      --warning: #ffb020;
+      --warning-glow: rgba(255, 176, 32, 0.2);
+      --danger: #ff4060;
+      --danger-glow: rgba(255, 64, 96, 0.2);
+      --radius: 16px;
+      --radius-sm: 10px;
+      --radius-xs: 6px;
+      --shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ─── Animated Background ──────────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 60% at 20% 10%, rgba(0, 100, 255, 0.08) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 50% at 80% 80%, rgba(120, 0, 255, 0.06) 0%, transparent 60%),
+        radial-gradient(ellipse 50% 40% at 50% 50%, rgba(0, 180, 255, 0.04) 0%, transparent 60%);
+      z-index: 0;
+      animation: bgShift 20s ease-in-out infinite alternate;
+    }
+
+    @keyframes bgShift {
+      0% { opacity: 1; }
+      50% { opacity: 0.7; }
+      100% { opacity: 1; }
+    }
+
+    /* ─── Layout ───────────────────────────────────── */
+    .app { position: relative; z-index: 1; max-width: 1280px; margin: 0 auto; padding: 24px; }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 0 32px;
+    }
+
+    .header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .header h1 .icon {
+      width: 38px;
+      height: 38px;
+      background: linear-gradient(135deg, var(--accent), #7c3aed);
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      font-size: 1.2rem;
+    }
+
+    .header-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+
+    /* ─── Card ─────────────────────────────────────── */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      box-shadow: var(--shadow);
+      transition: border-color var(--transition);
+    }
+
+    .card:hover { border-color: rgba(100, 140, 255, 0.18); }
+
+    .card-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-secondary);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-title .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    /* ─── Status Card ──────────────────────────────── */
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 18px;
+      background: var(--bg-input);
+      border-radius: var(--radius-sm);
+      margin-bottom: 20px;
+    }
+
+    .status-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      position: relative;
+    }
+
+    .status-dot::after {
+      content: '';
+      position: absolute;
+      inset: -4px;
+      border-radius: 50%;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    .status-dot.online { background: var(--success); }
+    .status-dot.online::after { background: var(--success-glow); }
+    .status-dot.starting { background: var(--warning); animation: blink 1s step-end infinite; }
+    .status-dot.starting::after { background: var(--warning-glow); }
+    .status-dot.offline { background: var(--danger); }
+    .status-dot.offline::after { background: var(--danger-glow); }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.8); opacity: 0; }
+    }
+
+    @keyframes blink {
+      50% { opacity: 0.4; }
+    }
+
+    .status-text { flex: 1; }
+    .status-text .label { font-size: 1.1rem; font-weight: 600; text-transform: capitalize; }
+    .status-text .sub { font-size: 0.8rem; color: var(--text-secondary); margin-top: 2px; }
+
+    .status-details {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .status-detail {
+      padding: 12px;
+      background: var(--bg-input);
+      border-radius: var(--radius-xs);
+    }
+
+    .status-detail .lbl { font-size: 0.7rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
+    .status-detail .val { font-size: 0.95rem; font-weight: 600; margin-top: 4px; }
+
+    .action-buttons { display: flex; flex-direction: column; gap: 10px; }
+
+    /* ─── Buttons ──────────────────────────────────── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 20px;
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      font-family: inherit;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--transition);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .btn::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      transition: opacity var(--transition);
+    }
+
+    .btn:hover:not(:disabled)::before { opacity: 1; }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #0070e0, #0050b0);
+      color: white;
+      border-color: rgba(0, 120, 255, 0.3);
+    }
+    .btn-primary::before { background: linear-gradient(135deg, #0080f0, #0060c0); }
+    .btn-primary:hover:not(:disabled) { box-shadow: 0 0 24px var(--accent-glow); }
+
+    .btn-success {
+      background: linear-gradient(135deg, #00a854, #008040);
+      color: white;
+      border-color: rgba(0, 200, 100, 0.3);
+    }
+    .btn-success::before { background: linear-gradient(135deg, #00b860, #009048); }
+    .btn-success:hover:not(:disabled) { box-shadow: 0 0 24px var(--success-glow); }
+
+    .btn-danger {
+      background: linear-gradient(135deg, #c02040, #901030);
+      color: white;
+      border-color: rgba(255, 60, 80, 0.3);
+    }
+    .btn-danger::before { background: linear-gradient(135deg, #d03050, #a01838); }
+    .btn-danger:hover:not(:disabled) { box-shadow: 0 0 24px var(--danger-glow); }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-secondary);
+      border-color: var(--border);
+    }
+    .btn-ghost:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border-focus); }
+
+    .btn .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ─── Model Config Card ────────────────────────── */
+    .model-section { margin-bottom: 24px; }
+    .model-section:last-child { margin-bottom: 0; }
+
+    .model-section-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .model-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    @media (max-width: 600px) {
+      .model-grid { grid-template-columns: 1fr; }
+    }
+
+    .model-card {
+      padding: 14px;
+      background: var(--bg-input);
+      border: 2px solid transparent;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all var(--transition);
+      position: relative;
+    }
+
+    .model-card:hover { border-color: rgba(100, 140, 255, 0.2); background: var(--bg-card-hover); }
+    .model-card.selected { border-color: var(--accent); background: rgba(0, 100, 255, 0.08); }
+
+    .model-card .model-name { font-size: 0.88rem; font-weight: 600; margin-bottom: 3px; }
+    .model-card .model-desc { font-size: 0.73rem; color: var(--text-dim); line-height: 1.4; }
+
+    .model-card .model-vram {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 3px 8px;
+      background: rgba(0, 180, 255, 0.1);
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    .model-card.selected .model-vram { background: rgba(0, 180, 255, 0.2); }
+
+    /* ─── VRAM Bar ─────────────────────────────────── */
+    .vram-bar-container {
+      margin: 20px 0;
+      padding: 16px;
+      background: var(--bg-input);
+      border-radius: var(--radius-sm);
+    }
+
+    .vram-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .vram-label .used { color: var(--accent); }
+    .vram-label .total { color: var(--text-dim); }
+
+    .vram-bar {
+      width: 100%;
+      height: 10px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 5px;
+      overflow: hidden;
+    }
+
+    .vram-bar-fill {
+      height: 100%;
+      border-radius: 5px;
+      background: linear-gradient(90deg, var(--accent), #7c3aed);
+      transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .vram-bar-fill.warning { background: linear-gradient(90deg, var(--warning), #ff6020); }
+    .vram-bar-fill.danger { background: linear-gradient(90deg, var(--danger), #ff2040); }
+
+    .vram-warn {
+      font-size: 0.73rem;
+      color: var(--danger);
+      margin-top: 6px;
+      display: none;
+    }
+
+    .vram-warn.show { display: block; }
+
+    .deploy-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .deploy-actions .btn { flex: 1; }
+
+    /* ─── Test Panel ───────────────────────────────── */
+    .test-panel { margin-bottom: 20px; }
+
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 20px;
+      background: var(--bg-input);
+      padding: 4px;
+      border-radius: var(--radius-sm);
+    }
+
+    .tab {
+      flex: 1;
+      padding: 10px;
+      border: none;
+      border-radius: var(--radius-xs);
+      background: transparent;
+      color: var(--text-secondary);
+      font-family: inherit;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+
+    .tab:hover { color: var(--text-primary); }
+    .tab.active { background: rgba(0, 100, 255, 0.15); color: var(--accent); }
+
+    .tab-content { display: none; }
+    .tab-content.active { display: block; animation: fadeIn 0.3s ease; }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* ─── Chat Panel ───────────────────────────────── */
+    .chat-messages {
+      min-height: 200px;
+      max-height: 400px;
+      overflow-y: auto;
+      padding: 16px;
+      background: var(--bg-input);
+      border-radius: var(--radius-sm);
+      margin-bottom: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .chat-messages::-webkit-scrollbar { width: 4px; }
+    .chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .chat-msg {
+      max-width: 85%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 0.85rem;
+      line-height: 1.5;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .chat-msg.user {
+      align-self: flex-end;
+      background: linear-gradient(135deg, #0060c0, #0040a0);
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+
+    .chat-msg.assistant {
+      align-self: flex-start;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 4px;
+    }
+
+    .chat-msg.system-msg {
+      align-self: center;
+      background: transparent;
+      color: var(--text-dim);
+      font-size: 0.78rem;
+      font-style: italic;
+    }
+
+    .chat-input-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    .chat-input {
+      flex: 1;
+      padding: 12px 16px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-family: inherit;
+      font-size: 0.88rem;
+      outline: none;
+      transition: border-color var(--transition);
+    }
+
+    .chat-input:focus { border-color: var(--border-focus); }
+    .chat-input::placeholder { color: var(--text-dim); }
+
+    /* ─── ASR Panel ────────────────────────────────── */
+    .dropzone {
+      padding: 40px;
+      border: 2px dashed var(--border);
+      border-radius: var(--radius-sm);
+      text-align: center;
+      transition: all var(--transition);
+      cursor: pointer;
+      margin-bottom: 14px;
+    }
+
+    .dropzone:hover, .dropzone.dragover {
+      border-color: var(--accent);
+      background: rgba(0, 180, 255, 0.04);
+    }
+
+    .dropzone .icon { font-size: 2rem; margin-bottom: 8px; }
+    .dropzone .text { font-size: 0.85rem; color: var(--text-secondary); }
+    .dropzone .sub { font-size: 0.73rem; color: var(--text-dim); margin-top: 4px; }
+
+    .dropzone input[type="file"] { display: none; }
+
+    .asr-file-info {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 12px;
+      background: var(--bg-input);
+      border-radius: var(--radius-xs);
+      margin-bottom: 14px;
+      font-size: 0.83rem;
+    }
+
+    .asr-file-info.show { display: flex; }
+    .asr-file-info .name { flex: 1; font-weight: 500; }
+    .asr-file-info .remove { cursor: pointer; color: var(--danger); font-weight: 700; }
+
+    .asr-options {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .asr-options select, .asr-options input {
+      padding: 10px 14px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xs);
+      color: var(--text-primary);
+      font-family: inherit;
+      font-size: 0.83rem;
+      outline: none;
+    }
+
+    .asr-options select { flex: 1; }
+    .asr-options select option { background: #1a1f30; }
+
+    .asr-result {
+      display: none;
+      padding: 16px;
+      background: var(--bg-input);
+      border-radius: var(--radius-sm);
+      margin-top: 14px;
+      font-size: 0.85rem;
+      line-height: 1.6;
+    }
+
+    .asr-result.show { display: block; animation: fadeIn 0.3s ease; }
+    .asr-result .meta { font-size: 0.73rem; color: var(--text-dim); margin-top: 10px; }
+
+    /* ─── Activity Log ─────────────────────────────── */
+    .log-entries {
+      max-height: 240px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .log-entries::-webkit-scrollbar { width: 4px; }
+    .log-entries::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .log-entry {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 8px 12px;
+      background: var(--bg-input);
+      border-radius: var(--radius-xs);
+      font-size: 0.78rem;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .log-entry .time { color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .log-entry .msg { color: var(--text-secondary); flex: 1; }
+    .log-entry.info .msg { color: var(--accent); }
+    .log-entry.success .msg { color: var(--success); }
+    .log-entry.warn .msg { color: var(--warning); }
+    .log-entry.error .msg { color: var(--danger); }
+
+    /* ─── Toast ────────────────────────────────────── */
+    .toasts {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .toast {
+      padding: 14px 20px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      backdrop-filter: blur(20px);
+      font-size: 0.83rem;
+      font-weight: 500;
+      box-shadow: var(--shadow);
+      animation: slideIn 0.3s ease, slideOut 0.3s ease 3.7s forwards;
+      max-width: 360px;
+    }
+
+    .toast.success { border-color: rgba(0, 232, 123, 0.3); color: var(--success); }
+    .toast.error { border-color: rgba(255, 64, 96, 0.3); color: var(--danger); }
+    .toast.info { border-color: rgba(0, 180, 255, 0.3); color: var(--accent); }
+
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } }
+    @keyframes slideOut { to { transform: translateX(100%); opacity: 0; } }
+
+    .empty-state {
+      text-align: center;
+      padding: 30px;
+      color: var(--text-dim);
+      font-size: 0.83rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <h1>
+        <span class="icon">⚡</span>
+        GPU Dashboard
+      </h1>
+      <div class="header-status">
+        <span id="headerStatusDot" class="status-dot offline" style="width:10px;height:10px;"></span>
+        <span id="headerStatusText">Offline</span>
+      </div>
+    </header>
+
+    <!-- Top Grid: Status + Model Config -->
+    <div class="grid">
+      <!-- Status Panel -->
+      <div class="card" id="statusCard">
+        <div class="card-title"><span class="dot"></span> Server Status</div>
+
+        <div class="status-indicator">
+          <div id="statusDot" class="status-dot offline"></div>
+          <div class="status-text">
+            <div id="statusLabel" class="label">Offline</div>
+            <div id="statusSub" class="sub">No notebook running</div>
+          </div>
+        </div>
+
+        <div class="status-details">
+          <div class="status-detail">
+            <div class="lbl">Uptime</div>
+            <div id="statUptime" class="val">—</div>
+          </div>
+          <div class="status-detail">
+            <div class="lbl">Remaining</div>
+            <div id="statRemaining" class="val">—</div>
+          </div>
+          <div class="status-detail">
+            <div class="lbl">LLM Model</div>
+            <div id="statLLM" class="val">—</div>
+          </div>
+          <div class="status-detail">
+            <div class="lbl">ASR Model</div>
+            <div id="statASR" class="val">—</div>
+          </div>
+          <div class="status-detail" style="grid-column: span 2;">
+            <div class="lbl">Zero Cold-Start (Groq Fallback)</div>
+            <div id="statGroq" class="val" style="color:var(--text-dim);font-size:0.8rem;">Checking...</div>
+          </div>
+        </div>
+
+        <div class="action-buttons">
+          <button id="btnTerminate" class="btn btn-danger" disabled onclick="terminateNotebook()">
+            🛑 Terminate Notebook
+          </button>
+          <button id="btnRefresh" class="btn btn-ghost" onclick="fetchStatus()">
+            🔄 Refresh Status
+          </button>
+        </div>
+      </div>
+
+      <!-- Model Configuration -->
+      <div class="card" id="modelCard">
+        <div class="card-title"><span class="dot" style="background:var(--success)"></span> Model Configuration</div>
+
+        <!-- LLM Selection -->
+        <div class="model-section">
+          <div class="model-section-title">🧠 LLM Model</div>
+          <div id="llmModels" class="model-grid"></div>
+        </div>
+
+        <!-- ASR Selection -->
+        <div class="model-section">
+          <div class="model-section-title">🎤 ASR Model</div>
+          <div id="asrModels" class="model-grid"></div>
+        </div>
+
+        <!-- VRAM Bar -->
+        <div class="vram-bar-container">
+          <div class="vram-label">
+            <span class="used" id="vramUsed">0.0 GB</span>
+            <span class="total">15.0 GB T4</span>
+          </div>
+          <div class="vram-bar">
+            <div id="vramFill" class="vram-bar-fill" style="width: 0%"></div>
+          </div>
+          <div id="vramWarn" class="vram-warn">⚠️ Selected models exceed available VRAM!</div>
+        </div>
+
+        <!-- Deploy Actions -->
+        <div class="deploy-actions">
+          <button id="btnDeploy" class="btn btn-success" onclick="deployNotebook()">
+            🚀 Deploy
+          </button>
+          <button id="btnRedeploy" class="btn btn-primary" disabled onclick="redeployNotebook()">
+            🔄 Redeploy
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Test Panel -->
+    <div class="card test-panel">
+      <div class="card-title"><span class="dot" style="background:var(--warning)"></span> Test Panel</div>
+
+      <div class="tabs">
+        <button class="tab active" onclick="switchTab('chat')">💬 Chat (LLM)</button>
+        <button class="tab" onclick="switchTab('completion')">📝 Completion</button>
+        <button class="tab" onclick="switchTab('asr')">🎤 Transcribe (ASR)</button>
+      </div>
+
+      <!-- Chat Tab -->
+      <div id="tabChat" class="tab-content active">
+        <div id="chatMessages" class="chat-messages">
+          <div class="empty-state">Send a message to start chatting with the LLM</div>
+        </div>
+        <div class="chat-input-row">
+          <input id="chatInput" class="chat-input" type="text" placeholder="Type a message..." onkeydown="if(event.key==='Enter')sendChat()">
+          <button class="btn btn-primary" onclick="sendChat()" id="btnSendChat">Send</button>
+        </div>
+      </div>
+
+      <!-- Completion Tab -->
+      <div id="tabCompletion" class="tab-content">
+        <textarea id="completionInput" class="chat-input" style="width:100%;height:100px;resize:vertical;margin-bottom:12px;" placeholder="Enter a prompt for text completion..."></textarea>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;">
+          <label style="font-size:0.8rem;color:var(--text-secondary);">Max tokens:</label>
+          <input id="completionTokens" type="number" value="256" min="1" max="4096" class="chat-input" style="width:100px;">
+          <label style="font-size:0.8rem;color:var(--text-secondary);">Temp:</label>
+          <input id="completionTemp" type="number" value="0.7" min="0" max="2" step="0.1" class="chat-input" style="width:80px;">
+          <button class="btn btn-primary" onclick="sendCompletion()" id="btnCompletion">Generate</button>
+        </div>
+        <div id="completionResult" class="asr-result"></div>
+      </div>
+
+      <!-- ASR Tab -->
+      <div id="tabAsr" class="tab-content">
+        <div id="dropzone" class="dropzone" onclick="document.getElementById('audioFile').click()">
+          <div class="icon">🎵</div>
+          <div class="text">Drop audio file here or click to browse</div>
+          <div class="sub">Supports WAV, MP3, FLAC, OGG, M4A (max 25 MB)</div>
+          <input type="file" id="audioFile" accept="audio/*" onchange="handleFileSelect(this)">
+        </div>
+        <div id="asrFileInfo" class="asr-file-info">
+          <span>🎵</span>
+          <span id="asrFileName" class="name"></span>
+          <span class="remove" onclick="clearFile()">✕</span>
+        </div>
+        <div class="asr-options">
+          <select id="asrLanguage">
+            <option value="">Auto-detect language</option>
+            <option value="en">English</option>
+            <option value="es">Spanish</option>
+            <option value="fr">French</option>
+            <option value="de">German</option>
+            <option value="ja">Japanese</option>
+            <option value="zh">Chinese</option>
+            <option value="ko">Korean</option>
+            <option value="hi">Hindi</option>
+            <option value="ar">Arabic</option>
+            <option value="pt">Portuguese</option>
+            <option value="ru">Russian</option>
+          </select>
+          <select id="asrTask">
+            <option value="transcribe">Transcribe</option>
+            <option value="translate">Translate to English</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="transcribeAudio()" id="btnTranscribe" disabled style="width:100%;">
+          🎤 Transcribe
+        </button>
+        <div id="asrResult" class="asr-result"></div>
+      </div>
+    </div>
+
+    <!-- Activity Log -->
+    <div class="card">
+      <div class="card-title"><span class="dot" style="background:var(--text-dim)"></span> Activity Log</div>
+      <div id="logEntries" class="log-entries">
+        <div class="empty-state">No activity yet</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toasts Container -->
+  <div id="toasts" class="toasts"></div>
+
+  <script>
+    // ─── State ──────────────────────────────────────
+    const API = window.location.origin;
+    let models = { llm: [], asr: [] };
+    let selectedLLM = null;
+    let selectedASR = null;
+    let chatHistory = [];
+    let selectedFile = null;
+    let statusInterval = null;
+
+    // ─── Init ───────────────────────────────────────
+    async function init() {
+      addLog('info', 'Dashboard loaded');
+      await loadModels();
+      await fetchStatus();
+      // Poll status every 8 seconds
+      statusInterval = setInterval(fetchStatus, 8000);
+    }
+
+    // ─── Models ─────────────────────────────────────
+    async function loadModels() {
+      try {
+        const resp = await fetch(`${API}/api/models`);
+        models = await resp.json();
+        renderModelCards();
+        addLog('info', `Loaded ${models.llm.length} LLM + ${models.asr.length} ASR models`);
+      } catch (e) {
+        addLog('error', 'Failed to load model catalog');
+      }
+    }
+
+    function renderModelCards() {
+      const llmGrid = document.getElementById('llmModels');
+      const asrGrid = document.getElementById('asrModels');
+
+      llmGrid.innerHTML = models.llm.map(m => `
+        <div class="model-card ${selectedLLM === m.id ? 'selected' : ''}" onclick="selectModel('llm','${m.id}')">
+          <div class="model-name">${m.name}</div>
+          <div class="model-desc">${m.description}</div>
+          <span class="model-vram">${m.vram_gb} GB VRAM</span>
+        </div>
+      `).join('');
+
+      asrGrid.innerHTML = models.asr.map(m => `
+        <div class="model-card ${selectedASR === m.id ? 'selected' : ''}" onclick="selectModel('asr','${m.id}')">
+          <div class="model-name">${m.name}</div>
+          <div class="model-desc">${m.description}</div>
+          <span class="model-vram">${m.vram_gb} GB VRAM</span>
+        </div>
+      `).join('');
+
+      // Auto-select defaults
+      if (!selectedLLM && models.llm.length) selectModel('llm', models.llm[0].id);
+      if (!selectedASR && models.asr.length) selectModel('asr', models.asr[0].id);
+    }
+
+    function selectModel(type, id) {
+      if (type === 'llm') selectedLLM = id;
+      else selectedASR = id;
+      renderModelCards();
+      updateVRAM();
+    }
+
+    function getModel(type, id) {
+      return models[type].find(m => m.id === id);
+    }
+
+    function updateVRAM() {
+      const llm = getModel('llm', selectedLLM);
+      const asr = getModel('asr', selectedASR);
+      const used = (llm ? llm.vram_gb : 0) + (asr ? asr.vram_gb : 0);
+      const pct = (used / 15) * 100;
+
+      document.getElementById('vramUsed').textContent = `${used.toFixed(1)} GB`;
+      const fill = document.getElementById('vramFill');
+      fill.style.width = `${Math.min(pct, 100)}%`;
+      fill.className = 'vram-bar-fill' + (pct > 90 ? ' danger' : pct > 70 ? ' warning' : '');
+
+      const warn = document.getElementById('vramWarn');
+      warn.classList.toggle('show', used > 15);
+
+      document.getElementById('btnDeploy').disabled = used > 15;
+    }
+
+    // ─── Status ─────────────────────────────────────
+    async function fetchStatus() {
+      try {
+        const resp = await fetch(`${API}/api/status`);
+        const data = await resp.json();
+        updateStatusUI(data);
+
+        // Also try to get notebook health if online
+        if (data.is_healthy) {
+          try {
+            const hResp = await fetch(`${API}/api/notebook/health`);
+            if (hResp.ok) {
+              const health = await hResp.json();
+              document.getElementById('statUptime').textContent = formatTime(health.uptime_seconds);
+              document.getElementById('statRemaining').textContent = formatTime(health.remaining_seconds);
+              if (health.models) {
+                document.getElementById('statLLM').textContent = health.models.llm || '—';
+                document.getElementById('statASR').textContent = health.models.asr || '—';
+              }
+            }
+          } catch {}
+        }
+      } catch (e) {
+        updateStatusUI({ status: 'error', is_healthy: false });
+      }
+    }
+
+    function updateStatusUI(data) {
+      const status = data.status || 'offline';
+      const isHealthy = data.is_healthy;
+
+      // Dots
+      ['statusDot', 'headerStatusDot'].forEach(id => {
+        const dot = document.getElementById(id);
+        dot.className = `status-dot ${status === 'online' && isHealthy ? 'online' : status === 'starting' ? 'starting' : 'offline'}`;
+      });
+
+      // Labels
+      const displayStatus = status === 'online' && isHealthy ? 'Online' : status === 'starting' ? 'Starting...' : 'Offline';
+      document.getElementById('statusLabel').textContent = displayStatus;
+      document.getElementById('headerStatusText').textContent = displayStatus;
+
+      const subs = {
+        online: 'GPU notebook is running',
+        starting: 'Notebook is booting up (~3-5 min)',
+        offline: 'No notebook running',
+      };
+      document.getElementById('statusSub').textContent = isHealthy ? subs.online : subs[status] || subs.offline;
+
+      // Buttons
+      document.getElementById('btnTerminate').disabled = status === 'offline';
+      document.getElementById('btnRedeploy').disabled = status === 'offline';
+
+      if (!isHealthy) {
+        document.getElementById('statUptime').textContent = '—';
+        document.getElementById('statRemaining').textContent = '—';
+      }
+
+      const groqEl = document.getElementById('statGroq');
+      if (groqEl) {
+        if (data.has_groq_fallback) {
+          groqEl.textContent = `⚡ Active (${data.groq_models?.asr || 'whisper-large-v3'})`;
+          groqEl.style.color = 'var(--success)';
+        } else {
+          groqEl.textContent = 'Not configured (optional)';
+          groqEl.style.color = 'var(--text-dim)';
+        }
+      }
+    }
+
+    function formatTime(seconds) {
+      if (!seconds && seconds !== 0) return '—';
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      return h > 0 ? `${h}h ${m}m` : `${m}m`;
+    }
+
+    // ─── Deploy / Terminate ─────────────────────────
+    async function deployNotebook() {
+      if (!selectedLLM || !selectedASR) {
+        toast('Select both LLM and ASR models', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('btnDeploy');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Deploying...';
+
+      try {
+        const resp = await fetch(`${API}/api/deploy`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ llm_id: selectedLLM, asr_id: selectedASR }),
+        });
+        const data = await resp.json();
+
+        if (resp.ok) {
+          toast('Notebook triggered! Starting in ~3-5 minutes.', 'success');
+          addLog('success', `Deploy triggered — LLM: ${selectedLLM}, ASR: ${selectedASR}`);
+        } else {
+          toast(data.error || 'Deploy failed', 'error');
+          addLog('error', `Deploy failed: ${data.error}`);
+        }
+      } catch (e) {
+        toast('Network error', 'error');
+        addLog('error', `Deploy error: ${e.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '🚀 Deploy';
+      }
+    }
+
+    async function redeployNotebook() {
+      addLog('warn', 'Redeploying — terminating current notebook...');
+      await terminateNotebook(true);
+      // Wait a moment for termination
+      await new Promise(r => setTimeout(r, 2000));
+      await deployNotebook();
+    }
+
+    async function terminateNotebook(silent = false) {
+      const btn = document.getElementById('btnTerminate');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Terminating...';
+
+      try {
+        const resp = await fetch(`${API}/api/terminate`, { method: 'POST' });
+        const data = await resp.json();
+
+        if (!silent) {
+          if (resp.ok) {
+            toast('Notebook terminated', 'info');
+            addLog('warn', 'Notebook terminated');
+          } else {
+            toast(data.error || 'Terminate failed', 'error');
+          }
+        }
+      } catch (e) {
+        if (!silent) toast('Network error', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '🛑 Terminate Notebook';
+        fetchStatus();
+      }
+    }
+
+    // ─── Chat ───────────────────────────────────────
+    async function sendChat() {
+      const input = document.getElementById('chatInput');
+      const msg = input.value.trim();
+      if (!msg) return;
+      input.value = '';
+
+      // Clear empty state
+      const container = document.getElementById('chatMessages');
+      if (container.querySelector('.empty-state')) container.innerHTML = '';
+
+      // Add user message
+      chatHistory.push({ role: 'user', content: msg });
+      appendChatMsg('user', msg);
+
+      const btn = document.getElementById('btnSendChat');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span>';
+
+      try {
+        const resp = await fetch(`${API}/api/llm/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: chatHistory, max_tokens: 512, temperature: 0.7 }),
+        });
+
+        if (resp.status === 503) {
+          const data = await resp.json();
+          appendChatMsg('system-msg', data.message);
+        } else if (resp.ok) {
+          const data = await resp.json();
+          const reply = data.message.content;
+          chatHistory.push({ role: 'assistant', content: reply });
+          appendChatMsg('assistant', reply);
+        } else {
+          const data = await resp.json();
+          appendChatMsg('system-msg', `Error: ${data.error || data.detail}`);
+        }
+      } catch (e) {
+        appendChatMsg('system-msg', `Network error: ${e.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Send';
+      }
+    }
+
+    function appendChatMsg(type, text) {
+      const container = document.getElementById('chatMessages');
+      const div = document.createElement('div');
+      div.className = `chat-msg ${type}`;
+      div.textContent = text;
+      container.appendChild(div);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    // ─── Completion ─────────────────────────────────
+    async function sendCompletion() {
+      const prompt = document.getElementById('completionInput').value.trim();
+      if (!prompt) return;
+
+      const btn = document.getElementById('btnCompletion');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Generating...';
+
+      const result = document.getElementById('completionResult');
+      result.classList.remove('show');
+
+      try {
+        const resp = await fetch(`${API}/api/llm`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt,
+            max_tokens: parseInt(document.getElementById('completionTokens').value) || 256,
+            temperature: parseFloat(document.getElementById('completionTemp').value) || 0.7,
+          }),
+        });
+
+        if (resp.status === 503) {
+          const data = await resp.json();
+          result.innerHTML = `<em>${data.message}</em>`;
+        } else if (resp.ok) {
+          const data = await resp.json();
+          result.innerHTML = `<div style="white-space:pre-wrap;">${escapeHtml(data.text)}</div>
+            <div class="meta">Tokens — prompt: ${data.usage?.prompt_tokens || '?'}, completion: ${data.usage?.completion_tokens || '?'}</div>`;
+        } else {
+          const data = await resp.json();
+          result.innerHTML = `<span style="color:var(--danger)">Error: ${escapeHtml(data.error || data.detail)}</span>`;
+        }
+        result.classList.add('show');
+      } catch (e) {
+        result.innerHTML = `<span style="color:var(--danger)">Network error: ${escapeHtml(e.message)}</span>`;
+        result.classList.add('show');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Generate';
+      }
+    }
+
+    // ─── ASR ────────────────────────────────────────
+    function handleFileSelect(input) {
+      const file = input.files[0];
+      if (!file) return;
+      selectedFile = file;
+      document.getElementById('asrFileInfo').classList.add('show');
+      document.getElementById('asrFileName').textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`;
+      document.getElementById('btnTranscribe').disabled = false;
+    }
+
+    function clearFile() {
+      selectedFile = null;
+      document.getElementById('audioFile').value = '';
+      document.getElementById('asrFileInfo').classList.remove('show');
+      document.getElementById('btnTranscribe').disabled = true;
+      document.getElementById('asrResult').classList.remove('show');
+    }
+
+    // Drag & drop
+    const dz = document.getElementById('dropzone');
+    ['dragenter', 'dragover'].forEach(e => dz.addEventListener(e, ev => { ev.preventDefault(); dz.classList.add('dragover'); }));
+    ['dragleave', 'drop'].forEach(e => dz.addEventListener(e, ev => { ev.preventDefault(); dz.classList.remove('dragover'); }));
+    dz.addEventListener('drop', ev => {
+      const file = ev.dataTransfer.files[0];
+      if (file) {
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        document.getElementById('audioFile').files = dt.files;
+        handleFileSelect(document.getElementById('audioFile'));
+      }
+    });
+
+    async function transcribeAudio() {
+      if (!selectedFile) return;
+
+      const btn = document.getElementById('btnTranscribe');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Transcribing...';
+      const result = document.getElementById('asrResult');
+      result.classList.remove('show');
+
+      const form = new FormData();
+      form.append('file', selectedFile);
+      const lang = document.getElementById('asrLanguage').value;
+      if (lang) form.append('language', lang);
+      form.append('task', document.getElementById('asrTask').value);
+
+      try {
+        const resp = await fetch(`${API}/api/asr`, { method: 'POST', body: form });
+
+        if (resp.status === 503) {
+          const data = await resp.json();
+          result.innerHTML = `<em>${data.message}</em>`;
+        } else if (resp.ok) {
+          const data = await resp.json();
+          result.innerHTML = `
+            <div style="white-space:pre-wrap;margin-bottom:10px;">${escapeHtml(data.text)}</div>
+            <div class="meta">
+              Language: ${data.language} (${(data.language_probability * 100).toFixed(1)}%) · Duration: ${data.duration?.toFixed(1)}s · Segments: ${data.segments?.length || 0}
+            </div>`;
+          addLog('success', `Transcribed ${selectedFile.name} — ${data.text.substring(0, 50)}...`);
+        } else {
+          const data = await resp.json();
+          result.innerHTML = `<span style="color:var(--danger)">Error: ${escapeHtml(data.error || data.detail)}</span>`;
+        }
+        result.classList.add('show');
+      } catch (e) {
+        result.innerHTML = `<span style="color:var(--danger)">Network error: ${escapeHtml(e.message)}</span>`;
+        result.classList.add('show');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '🎤 Transcribe';
+      }
+    }
+
+    // ─── Tabs ───────────────────────────────────────
+    function switchTab(name) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+
+      const tabs = { chat: 0, completion: 1, asr: 2 };
+      document.querySelectorAll('.tab')[tabs[name]].classList.add('active');
+      document.getElementById(`tab${name.charAt(0).toUpperCase() + name.slice(1)}`).classList.add('active');
+    }
+
+    // ─── Activity Log ───────────────────────────────
+    function addLog(level, message) {
+      const container = document.getElementById('logEntries');
+      if (container.querySelector('.empty-state')) container.innerHTML = '';
+
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${level}`;
+      entry.innerHTML = `
+        <span class="time">${new Date().toLocaleTimeString()}</span>
+        <span class="msg">${escapeHtml(message)}</span>
+      `;
+      container.prepend(entry);
+
+      // Keep max 50 entries
+      while (container.children.length > 50) container.lastChild.remove();
+    }
+
+    // ─── Toast ──────────────────────────────────────
+    function toast(message, type = 'info') {
+      const container = document.getElementById('toasts');
+      const el = document.createElement('div');
+      el.className = `toast ${type}`;
+      el.textContent = message;
+      container.appendChild(el);
+      setTimeout(() => el.remove(), 4000);
+    }
+
+    // ─── Util ───────────────────────────────────────
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // ─── Start ──────────────────────────────────────
+    init();
+  </script>
+</body>
+</html>
