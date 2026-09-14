@@ -869,7 +869,7 @@ app.post(["/api/llm/chat", "/v1/chat/completions"], async (req, res) => {
   }
 
   try {
-    const result = await proxyJsonRequest("/llm/chat", {
+    const result = await proxyJsonRequest("/v1/chat/completions", {
       messages: req.body.messages,
       max_tokens: req.body.max_tokens || 512,
       temperature: req.body.temperature || 0.7,
