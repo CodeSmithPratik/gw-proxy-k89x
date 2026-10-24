@@ -346,13 +346,25 @@ async function triggerKaggleNotebook(llmId, asrId) {
 /**
  * Proxy a JSON request to the notebook.
  */
-async function proxyJsonRequest(notebookPath, body, timeout = 120000) {
+/**
+ * Auth headers from the API caller, forwarded to the notebook so its own
+ * API key enforcement (fail-closed since server v2.1) can validate the
+ * original client instead of trusting everything from the gateway.
+ */
+function clientAuthHeaders(req) {
+  const h = {};
+  if (req.headers.authorization) h["Authorization"] = req.headers.authorization;
+  if (req.headers["x-api-key"]) h["X-API-Key"] = req.headers["x-api-key"];
+  return h;
+}
+
+async function proxyJsonRequest(notebookPath, body, timeout = 120000, extraHeaders = {}) {
   const url = `${state.tunnelUrl}${notebookPath}`;
   console.log(`  ↳ Proxy → ${url}`);
 
   const resp = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...extraHeaders },
     body: JSON.stringify(body),
     timeout,
   });
@@ -367,9 +379,9 @@ async function proxyJsonRequest(notebookPath, body, timeout = 120000) {
 /**
  * Proxy a GET request to the notebook.
  */
-async function proxyGetRequest(notebookPath, timeout = 10000) {
+async function proxyGetRequest(notebookPath, timeout = 10000, extraHeaders = {}) {
   const url = `${state.tunnelUrl}${notebookPath}`;
-  const resp = await fetch(url, { method: "GET", timeout });
+  const resp = await fetch(url, { method: "GET", timeout, headers: extraHeaders });
   if (!resp.ok) {
     const errText = await resp.text().catch(() => "Unknown error");
     throw new Error(`Notebook returned ${resp.status}: ${errText}`);
@@ -384,7 +396,8 @@ async function proxyFileUpload(
   notebookPath,
   file,
   extraFields = {},
-  timeout = 180000
+  timeout = 180000,
+  extraHeaders = {}
 ) {
   const url = `${state.tunnelUrl}${notebookPath}`;
   console.log(`  ↳ Proxy file → ${url}`);
@@ -403,7 +416,7 @@ async function proxyFileUpload(
   const resp = await fetch(url, {
     method: "POST",
     body: form,
-    headers: form.getHeaders(),
+    headers: { ...form.getHeaders(), ...extraHeaders },
     timeout,
   });
 
@@ -730,7 +743,7 @@ app.get("/api/notebook/health", async (req, res) => {
     return res.status(503).json({ error: "Notebook is not online" });
   }
   try {
-    const data = await proxyGetRequest("/health");
+    const data = await proxyGetRequest("/health", undefined, clientAuthHeaders(req));
     res.json(data);
   } catch (err) {
     handleProxyError(err, res);
@@ -770,7 +783,7 @@ app.post(["/api/asr", "/asr", "/v1/audio/transcriptions"], upload.single("file")
     const result = await proxyFileUpload("/asr", req.file, {
       language: req.body.language,
       task: req.body.task,
-    });
+    }, undefined, clientAuthHeaders(req));
     res.json(result);
   } catch (err) {
     if (GROQ_API_KEY) {
@@ -820,7 +833,7 @@ app.post(["/api/llm", "/v1/completions"], async (req, res) => {
       max_tokens: req.body.max_tokens || 512,
       temperature: req.body.temperature || 0.7,
       stop: req.body.stop || null,
-    });
+    }, undefined, clientAuthHeaders(req));
     res.json(result);
   } catch (err) {
     if (GROQ_API_KEY) {
@@ -873,7 +886,7 @@ app.post(["/api/llm/chat", "/v1/chat/completions"], async (req, res) => {
       messages: req.body.messages,
       max_tokens: req.body.max_tokens || 512,
       temperature: req.body.temperature || 0.7,
-    });
+    }, undefined, clientAuthHeaders(req));
     res.json(result);
   } catch (err) {
     if (GROQ_API_KEY) {
