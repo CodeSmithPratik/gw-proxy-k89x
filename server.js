@@ -645,8 +645,32 @@ app.get("/api/status", (req, res) => {
 });
 
 /** GET /api/models — Model catalog for the dashboard */
-app.get("/api/models", (req, res) => {
+/** GET /api/models — live catalog from the notebook; static fallback when offline */
+app.get("/api/models", async (req, res) => {
+  if (isNotebookHealthy()) {
+    try {
+      const data = await proxyGetRequest("/api/models", 10000, clientAuthHeaders(req));
+      return res.json(data);
+    } catch (err) {
+      console.error("Live model catalog fetch failed, serving static:", err.message);
+    }
+  }
   res.json(MODEL_CATALOG);
+});
+
+/** GET /api/capabilities — proxy the notebook's versioned manifest (dynamic
+ * model list + accepted wire formats) so clients negotiate through the
+ * permanent gateway URL exactly as they would against the tunnel directly. */
+app.get("/api/capabilities", async (req, res) => {
+  if (!isNotebookHealthy()) {
+    return res.status(503).json({ error: "Notebook offline — no capabilities available." });
+  }
+  try {
+    const data = await proxyGetRequest("/api/capabilities", 10000, clientAuthHeaders(req));
+    res.json(data);
+  } catch (err) {
+    handleProxyError(err, res);
+  }
 });
 
 /** POST /api/deploy — Deploy notebook with chosen models */
